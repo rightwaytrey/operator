@@ -127,6 +127,8 @@ do not retry in a loop.
 ## Working on this repo
 
 The Python package is `opr` (not `operator`, which is a stdlib module).
+`op` is Linux/X11 only today; `WINDOWS.md` maps out a native Windows
+backend for anyone porting it.
 `./smoke.sh` exercises every subcommand inside a private session. When you
 change the command surface, update this file and
 `skills/operator/SKILL.md` (the Claude Code copy of these instructions)

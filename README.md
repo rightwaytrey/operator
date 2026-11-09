@@ -104,6 +104,10 @@ Run your agent (Codex, Claude Code) **inside the WSL shell**, so `op` is on
 its PATH. The WSL path has been written up from known WSLg behaviour and
 not yet run end to end by the author; please open an issue with what you hit.
 
+WSL drives a Linux desktop inside the VM, not your Windows screen. What a
+**native Windows backend** would take, module by module, is written up in
+`WINDOWS.md`.
+
 ## Using it from an agent
 
 - **Claude Code** — `install.sh` symlinks `skills/operator/SKILL.md` into
