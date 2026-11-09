@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>op session</title>
+<style>
+  html, body { margin:0; height:100%; background:#0f1115; overflow:hidden;
+               font:14px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:#e6e8ee; }
+  body { display:flex; flex-direction:column; }
+  /* The bar is what the vendored noVNC page lacks: a way back to the index,
+     which matters in a home-screen web app with no browser chrome. */
+  .bar { display:flex; align-items:center; gap:12px; padding:6px 10px;
+         padding-top:calc(6px + env(safe-area-inset-top)); border-bottom:1px solid #2a2f3a; flex:none; }
+  .bar a { color:#6ea8fe; text-decoration:none; padding:4px 8px; border-radius:6px; white-space:nowrap; flex:none; }
+  .bar a:hover { background:#2a2f3a; }
+  .bar b { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar span { color:#8b93a7; font-size:12px; flex:1; min-width:0; white-space:nowrap;
+              overflow:hidden; text-overflow:ellipsis; }
+  @media (max-width: 640px) { .bar span { display:none; } }
+  iframe { flex:1; border:0; width:100%; background:#000; }
+  .ended { position:absolute; inset:48px 0 0; display:flex; align-items:center; justify-content:center; color:#8b93a7; }
+</style>
+</head>
+<body>
+<div class="bar"><a href="./">‹ sessions</a><b id="name"></b><span>interactive — your mouse and keyboard go into the session · pinch to zoom · the ⟩ handle at the left edge has the keyboard and clipboard</span></div>
+<iframe id="client" allow="clipboard-read; clipboard-write" title="session"></iframe>
+<script type="module">
+  import { pinchZoom } from './zoom.js';
+  import { keepAlive } from './live.js';
+
+  const q = new URLSearchParams(location.search);
+  const name = q.get('token') || '';
+  document.getElementById('name').textContent = name;
+  document.title = 'op session: ' + name;
+  // noVNC resolves `path` against this page's URL (new URL(path, location)),
+  // so it stays relative and works under a prefix such as nginx's
+  // /operator/ as well as at the root; see deploy/nginx-operator.conf.
+  const path = encodeURIComponent('websockify?token=' + name);
+  const frame = document.getElementById('client');
+  frame.addEventListener('load', () => {
+    // noVNC's page keeps its UI object private to its module. The iframe is
+    // same-origin, so add a module script *inside it* that imports the same
+    // module instance and exposes it; UI.rfb is then the live client (a new
+    // one after every reconnect, hence the getter).
+    const doc = frame.contentDocument, win = frame.contentWindow;
+    const hook = doc.createElement('script');
+    hook.type = 'module';
+    hook.textContent = "import UI from './app/ui.js'; window.UI = UI;";
+    doc.body.appendChild(hook);
+    doc.documentElement.style.overflow = 'hidden';
+    pinScroll(win, [doc.documentElement, doc.body, doc.getElementById('noVNC_container')]);
+    pinchZoom({ stage: doc.body, target: doc.getElementById('noVNC_container'),
+                rfb: () => (win.UI && win.UI.rfb) || null, win });
+  });
+  // The on-screen keyboard. iOS keeps the layout viewport full height when
+  // it opens, shrinks only the *visual* viewport, and scrolls the page to
+  // bring noVNC's hidden input into view -- overflow:hidden or not. The bar
+  // went off the top, the lower half of the picture sat under the keyboard,
+  // and nothing could scroll it back (touch-action: none). So the page is
+  // laid out in the visual viewport: when the keyboard opens the picture
+  // refits above it (pinch to zoom in), and any scroll iOS forces on either
+  // document is undone, since nothing on these pages is meant to scroll.
+  function pinScroll(w, els) {
+    const undo = () => {
+      if (w.scrollX || w.scrollY) w.scrollTo(0, 0);
+      for (const el of els) if (el && (el.scrollTop || el.scrollLeft)) el.scrollTop = el.scrollLeft = 0;
+    };
+    w.addEventListener('scroll', undo, { passive: true });
+    for (const el of els) if (el) el.addEventListener('scroll', undo, { passive: true });
+    return undo;
+  }
+  const vv = window.visualViewport;
+  if (vv) {
+    const unscroll = pinScroll(window, [document.documentElement, document.body]);
+    const fit = () => {
+      unscroll();
+      // position:fixed is relative to the layout viewport, which is what
+      // offsetTop is measured from: this pins the page to what is visible.
+      Object.assign(document.body.style, {
+        position: 'fixed', left: '0', right: '0',
+        top: vv.offsetTop + 'px', height: vv.height + 'px',
+      });
+    };
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+    fit();
+  }
+  frame.src = 'vnc.html?autoconnect=1&resize=scale&reconnect=1&reconnect_delay=2000&path=' + path;
+
+  // noVNC's own reconnect only reacts to a close event; a socket that dies
+  // silently, or a handshake that never finishes, would leave a stale
+  // picture or "Connecting…" forever (see live.js). Then start a fresh
+  // client; if the session itself is gone, stop and say so.
+  const client = () => { const w = frame.contentWindow; return (w && w.UI && w.UI.rfb) || null; };
+  keepAlive({
+    name,
+    rfb: client,
+    onDead: () => frame.contentWindow.location.reload(),
+    onEnded: () => {
+      frame.src = 'about:blank';
+      const note = document.createElement('div');
+      note.className = 'ended';
+      note.textContent = `session “${name}” has ended`;
+      document.body.appendChild(note);
+    },
+  });
+</script>
+</body>
+</html>

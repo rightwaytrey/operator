@@ -1,0 +1,15 @@
+[project]
+name = "operator-harness"
+version = "0.1.0"
+description = "See and drive an X11 desktop from the shell: screenshot, click, type, DOM-level Chrome control, and private per-agent sessions viewable in a browser"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "python-xlib>=0.33",
+    "pillow>=10.0",
+    "playwright>=1.40",
+    "websockify>=0.13.0",
+]
+
+[tool.uv]
+package = false

@@ -1,0 +1,7 @@
+# Shell scripts and the op shim must stay LF even when cloned on Windows
+# (Git for Windows defaults to core.autocrlf=true, and CRLF breaks bash).
+* text=auto eol=lf
+*.sh text eol=lf
+op text eol=lf
+*.py text eol=lf
+*.png binary

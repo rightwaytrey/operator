@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Thin shim: run the operator CLI inside the project's uv environment.
+# Resolves symlinks so this works when linked onto PATH from anywhere.
+set -euo pipefail
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+HERE="$(cd "$(dirname "$SELF")" && pwd)"
+export PYTHONPATH="$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
+
+# Self-heal the install if this repo has been moved or renamed. The links into
+# ~/.claude and ~/.local/bin are absolute, so a move leaves them dangling and
+# the operator skill silently disappears from other sessions. Repair only a
+# DANGLING symlink: if the link is absent entirely someone removed it on
+# purpose, and recreating it would override that.
+_relink() {
+    if [ -L "$1" ] && [ ! -e "$1" ]; then
+        ln -sfn "$2" "$1"
+        echo "op: repaired $1 -> $2 (repo moved)" >&2
+    fi
+}
+_relink "$HOME/.claude/skills/operator/SKILL.md" "$HERE/skills/operator/SKILL.md"
+_relink "$HOME/.local/bin/op" "$HERE/op"
+
+exec uv run --project "$HERE" --quiet python -m opr "$@"

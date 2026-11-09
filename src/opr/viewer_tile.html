@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>op session</title>
+<style>
+  html, body { margin:0; height:100%; background:#000; overflow:hidden; }
+  #stage { position:absolute; inset:0; overflow:hidden; }
+  #screen { width:100%; height:100%; }
+  #status { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+            color:#8b93a7; font:13px system-ui, sans-serif; background:#000; }
+  /* A way back to the index: the page is opened full-size from the index,
+     including inside a home-screen web app that has no browser chrome. */
+  #back { position:absolute; top:calc(8px + env(safe-area-inset-top)); left:calc(8px + env(safe-area-inset-left));
+          padding:6px 12px; border-radius:999px; background:rgba(24,27,34,.85); color:#e6e8ee;
+          font:14px system-ui, sans-serif; text-decoration:none; border:1px solid #2a2f3a; z-index:2; }
+  #back:hover { background:#2a2f3a; }
+  body.embed #back { display:none; }
+</style>
+</head>
+<body>
+<div id="stage"><div id="screen"></div></div>
+<div id="status">connecting…</div>
+<a id="back" href="./">‹ sessions</a>
+<script type="module">
+  // A bare noVNC client: no toolbar, scaled to fit, view-only unless
+  // ?view_only=0, and it reconnects on its own. The index embeds one per
+  // session (?embed=1 hides the back button); "Watch" opens one full-size.
+  // Pinch zooms the picture locally (zoom.js); view-only pages also pan
+  // with one finger and toggle zoom on a double-tap.
+  import RFB from './core/rfb.js';
+  import { pinchZoom } from './zoom.js';
+  import { keepAlive, sessionState } from './live.js';
+
+  const q = new URLSearchParams(location.search);
+  const name = q.get('token') || '';
+  const url = new URL('./websockify?token=' + encodeURIComponent(name), location.href);
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  document.title = 'op session: ' + name;
+  if (q.get('embed') === '1') document.body.classList.add('embed');
+
+  const status = document.getElementById('status');
+  const screen = document.getElementById('screen');
+  const viewOnly = q.get('view_only') !== '0';
+  let rfb = null;
+  let ended = false;
+  let retryTimer = 0;
+  pinchZoom({ stage: document.getElementById('stage'), target: screen,
+              rfb: () => rfb, viewOnly });
+
+  const show = text => { status.textContent = text; status.style.display = 'flex'; };
+
+  function connect() {
+    clearTimeout(retryTimer);
+    if (ended) return;
+    const me = rfb = new RFB(screen, url.href);
+    rfb.viewOnly = viewOnly;
+    rfb.scaleViewport = true;
+    rfb.resizeSession = false;
+    rfb.background = '#000';
+    rfb.addEventListener('connect', () => { status.style.display = 'none'; });
+    rfb.addEventListener('disconnect', e => {
+      if (me !== rfb) return;  // already replaced by a fresh client
+      show((e.detail.clean ? 'disconnected' : 'no connection') + ' — retrying');
+      retry();
+    });
+  }
+
+  // Retry only while the session exists: a tab left open on a removed
+  // session would otherwise knock on the viewer forever.
+  async function retry() {
+    const s = await sessionState(name);
+    if (s === 'gone' || s === 'dead') return end();
+    retryTimer = setTimeout(connect, 3000);
+  }
+
+  function end() {
+    ended = true;
+    clearTimeout(retryTimer);
+    if (rfb) { const old = rfb; rfb = null; try { old.disconnect(); } catch (e) {} }
+    show(`session “${name}” has ended`);
+  }
+
+  // A silently dead or stuck client: replace it now rather than show a
+  // stale picture (see live.js).
+  function replace(old) {
+    if (ended) return;
+    show('reconnecting…');
+    connect();  // rfb now points at the new client, so old's 'disconnect' is ignored
+    try { old.disconnect(); } catch (e) { /* already dead */ }
+  }
+
+  connect();
+  keepAlive({ name, rfb: () => rfb, onDead: replace, onEnded: end });
+</script>
+</body>
+</html>

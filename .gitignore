@@ -1,0 +1,9 @@
+shots/
+.venv/
+__pycache__/
+*.pyc
+vendor/
+CLAUDE.local.md
+deploy/nginx-operator.local.conf
+.claude/
+*.log

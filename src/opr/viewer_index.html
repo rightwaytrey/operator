@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-title" content="op sessions">
+<title>op sessions</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1115; --card:#181b22; --line:#2a2f3a;
+          --fg:#e6e8ee; --dim:#8b93a7; --accent:#6ea8fe; --ok:#3fb950; --bad:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .top { display:flex; align-items:baseline; gap:12px; padding:12px 20px;
+         padding-top:calc(12px + env(safe-area-inset-top)); border-bottom:1px solid var(--line); }
+  .top h1 { font-size:16px; margin:0; font-weight:600; }
+  .top .sub { color:var(--dim); font-size:13px; }
+  main { padding:16px 20px; display:grid; gap:16px;
+         grid-template-columns:repeat(auto-fill, minmax(min(440px, 100%), 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .card header { display:flex; align-items:center; gap:10px; padding:9px 12px;
+                 border-bottom:1px solid var(--line); }
+  .card h2 { font-size:15px; margin:0; font-weight:600; white-space:nowrap; }
+  .meta { color:var(--dim); font-size:12px; flex:1; white-space:nowrap;
+          overflow:hidden; text-overflow:ellipsis; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); flex:none; }
+  .dot.dead { background:var(--bad); }
+  nav { white-space:nowrap; }
+  nav a { color:var(--accent); text-decoration:none; margin-left:12px; font-weight:500; }
+  nav a:hover { text-decoration:underline; }
+  .screen { position:relative; background:#000; }
+  .screen iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+  /* The tile is view-only and would swallow taps; a cover link makes the
+     whole tile open Watch, which is what a tap on a phone means. */
+  .screen .cover { position:absolute; inset:0; z-index:1; }
+  .note { padding:28px 14px; color:var(--dim); text-align:center; }
+  .empty { grid-column:1/-1; color:var(--dim); text-align:center; padding:60px 0; }
+  code { background:#0b0d11; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+</style>
+</head>
+<body>
+<header class="top"><h1>op sessions</h1><span class="sub" id="sub">loading…</span></header>
+<main id="main"></main>
+<script>
+  // Polls /api/sessions and keeps one card per session. Tiles are noVNC in
+  // view-only mode; "Open" is the full interactive client in a new tab.
+  // Cards are only rebuilt when the set of sessions changes, so the live
+  // tiles are not reconnected on every poll.
+  const main = document.getElementById('main');
+  const sub = document.getElementById('sub');
+  let signature = null;
+  // As a home-screen web app there is no browser chrome, so links must stay
+  // in this window (the pages they open carry their own way back); in an
+  // ordinary browser a new tab is friendlier.
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  const blank = standalone ? '' : ' target="_blank"';
+
+  const esc = s => String(s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const meta = r => [r.display, r.size, r.alive ? 'up ' + r.age : 'dead',
+                     r.chrome ? 'chrome' : null].filter(Boolean).join(' · ');
+
+  function card(r) {
+    const [w, h] = (r.size || '1280x800').split('x');
+    let body, nav = '';
+    if (!r.alive) {
+      body = `<div class="note">its X server has exited — <code>op session rm ${esc(r.name)}</code></div>`;
+    } else if (r.kind !== 'xvnc') {
+      body = `<div class="note">a window on the main desktop titled “op session: ${esc(r.name)}” — not viewable here</div>`;
+    } else {
+      body = `<div class="screen" style="aspect-ratio:${+w}/${+h}"><iframe src="${esc(r.watch)}&embed=1" loading="lazy" title="${esc(r.name)}"></iframe><a class="cover" href="${esc(r.watch)}"${blank} aria-label="watch ${esc(r.name)}"></a></div>`;
+      nav = `<nav><a href="${esc(r.open)}"${blank} title="interactive: your mouse and keyboard go into the session">Open</a><a href="${esc(r.watch)}"${blank} title="view only, full size">Watch</a></nav>`;
+    }
+    return `<article class="card" data-name="${esc(r.name)}"><header><span class="dot${r.alive ? '' : ' dead'}"></span><h2>${esc(r.name)}</h2><span class="meta">${esc(meta(r))}</span>${nav}</header>${body}</article>`;
+  }
+
+  function render(data) {
+    const rows = data.sessions;
+    const live = rows.filter(r => r.alive).length;
+    sub.textContent = `${data.host} · ${live} live · updated ${new Date().toLocaleTimeString()}`;
+    const sig = rows.map(r => [r.name, r.alive, r.kind, r.created].join('|')).join(';');
+    if (sig === signature) {
+      for (const r of rows) {
+        const m = main.querySelector(`[data-name="${CSS.escape(r.name)}"] .meta`);
+        if (m) m.textContent = meta(r);
+      }
+      return;
+    }
+    signature = sig;
+    main.innerHTML = rows.length ? rows.map(card).join('')
+      : '<div class="empty">No sessions. An agent starts one with <code>op session new NAME</code>.</div>';
+  }
+
+  async function tick() {
+    try {
+      const res = await fetch('api/sessions', {cache: 'no-store'});
+      render(await res.json());
+    } catch (e) {
+      sub.textContent = 'viewer unreachable: ' + e.message;
+    }
+  }
+  tick();
+  setInterval(tick, 3000);
+</script>
+</body>
+</html>
