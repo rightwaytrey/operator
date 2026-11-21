@@ -114,6 +114,16 @@ else
 fi
 check "session rm"      ./op session rm "$sess" --purge
 
+echo "== a dead session is reaped, and its leftover profile can be purged =="
+sess="smoke-dead-$$"
+check "dead new"        ./op session new "$sess" --fresh
+kill "$(sed -n 's/.*"server_pid": \([0-9]*\).*/\1/p' "$HOME/.cache/op/sessions/$sess.json")"
+sleep 1
+check "dead -s refused" bash -c "! ./op -s '$sess' windows"
+check "dead reaped"     bash -c "! ./op session list | grep -q '$sess'"
+check "dead purge"      ./op session rm "$sess" --purge
+check "dead profile gone" test ! -e "$HOME/.config/operator-chrome-sessions/$sess"
+
 echo "== xephyr session (a window on the main desktop) =="
 sess="smoke-x-$$"
 check "xephyr new"      ./op session new "$sess" --xephyr --fresh --size 800x600

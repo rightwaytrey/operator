@@ -137,8 +137,11 @@ def use(name: str | None) -> None:
         return
     s = load(name)
     if not _alive(s.get("server_pid")):
-        raise SystemExit(f"session {name!r} is dead (its X server exited); "
-                         f"clean up with:  op session rm {name}")
+        reap()
+        raise SystemExit(
+            f"session {name!r} is dead (its X server exited) and has been "
+            f"cleaned up; its Chrome profile is kept. Start it again with:  "
+            f"op session new {name}")
     _current = {**DEFAULT, **s}
 
 
@@ -171,6 +174,36 @@ def _all() -> list[dict]:
 
 def all_sessions() -> list[dict]:
     return _all()
+
+
+def _reap_locked() -> list[str]:
+    """Drop every session whose X server is gone. Caller holds the lock."""
+    reaped = []
+    for s in _all():
+        if not _alive(s.get("server_pid")):
+            _teardown(s)
+            reaped.append(s["name"])
+    return reaped
+
+
+def reap() -> list[str]:
+    """Remove dead sessions from the registry and return their names.
+
+    A session dies without `op session rm` whenever its X server does: a
+    reboot, a kill, an agent that never cleaned up. Nothing can use such an
+    entry again, so `new`, `list`, `-s NAME` and the viewer all sweep them
+    instead of showing DEAD rows for someone to remove by hand. Only the
+    registry entry, the cookie and any stray Chrome or WM go. The Chrome
+    profile stays, since it may hold logins: a new session of the same name
+    picks it up, and `op session rm NAME --purge` deletes it.
+
+    The check runs under the registry lock, and `new` registers a session
+    only after its server has been spawned, so one that is still starting
+    is never mistaken for a dead one."""
+    if not any(not _alive(s.get("server_pid")) for s in _all()):
+        return []      # the common case: nothing to do, no lock taken
+    with _registry_lock():
+        return _reap_locked()
 
 
 def port_free(port: int) -> bool:
@@ -256,6 +289,7 @@ def new(name: str, size: str = "1280x800", xephyr: bool = False,
                                  f"(display {s['display']})")
             _teardown(s)    # dead leftover with the same name: replace it
 
+        _reap_locked()  # so dead sessions do not hold display numbers or ports
         others = _all()
         n = _free_display({int(s["display"][1:]) for s in others})
         port = _free_port({s["cdp_port"] for s in others})
@@ -436,18 +470,36 @@ def _teardown(s: dict, purge: bool = False) -> list[str]:
     return stopped
 
 
+def _leftover(name: str) -> dict:
+    """A stand-in entry for a name with no registry file but a profile on
+    disk: a session that was reaped, or removed without --purge."""
+    profile = os.path.join(PROFILES_DIR, name)
+    if not _NAME_RE.match(name) or not os.path.isdir(profile):
+        return load(name)       # raises the usual "no session" error
+    return {"name": name, "display": "no display", "chrome_profile": profile,
+            "leftover": True}
+
+
 def rm(names: list[str], everything: bool = False, purge: bool = False) -> None:
-    targets = _all() if everything else [load(n) for n in names]
+    targets = _all() if everything else [find(n) or _leftover(n) for n in names]
     if not targets:
         print("(no sessions)")
         return
     for s in targets:
+        if s.get("leftover") and not purge:
+            print(f"{s['name']}: already cleaned up; its Chrome profile is "
+                  f"kept at {s['chrome_profile']}  (--purge deletes it)")
+            continue
         stopped = _teardown(s, purge=purge)
         print(f"removed {s['name']} ({s['display']}): "
               + (", ".join(stopped) if stopped else "nothing was running"))
 
 
 def listing() -> None:
+    reaped = reap()
+    if reaped:
+        print(f"cleaned up {len(reaped)} dead session(s): {', '.join(reaped)}"
+              "  (Chrome profiles kept)\n")
     rows = _all()
     if not rows:
         print("(no sessions)  create one with:  op session new NAME")

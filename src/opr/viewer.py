@@ -97,6 +97,7 @@ def _age(created: str | None) -> str:
 
 def sessions_json() -> dict:
     rows = []
+    session.reap()      # a dead session leaves the page; it cannot come back
     for s in session.all_sessions():
         alive = session.alive(s.get("server_pid"))
         row = {k: s.get(k) for k in ("name", "display", "kind", "size",

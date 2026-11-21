@@ -101,6 +101,10 @@ op session rm transit-21-4          # always clean up when done
 - Pick a distinctive name (task or ticket id); it is what the user sees on
   the viewer page. `op session list` shows what exists; leave other agents'
   sessions alone.
+- A session whose X server has died (a reboot, say) is removed from the
+  list automatically and `op -s NAME` says so; `op session new NAME` starts
+  it again on the same Chrome profile. The profile is only ever deleted by
+  `op session rm NAME --purge`, which also works after the session is gone.
 - `op idle` is meaningless inside a session — the user never types there
   unless they have your viewer page open.
 

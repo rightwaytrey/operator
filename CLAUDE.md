@@ -111,6 +111,16 @@ Two kinds of X server:
   display is free only if its X socket, lock file **and** VNC port are.
 - `rm` kills that profile's Chrome, the WM and the server; it refuses to
   touch the main profile whatever the JSON says. `--purge` deletes the profile.
+- **Dead sessions are reaped automatically.** A session whose X server is
+  gone (a reboot, a kill, an agent that never ran `rm`) can never be used
+  again, so `session.reap()` drops its registry entry and cookie from `new`,
+  `list`, `-s NAME` and the viewer's `/api/sessions`; there are no DEAD rows
+  to remove by hand. It runs under the registry lock, and `new` registers a
+  session only after spawning its server, so a starting session is never
+  taken for a dead one. The Chrome **profile is kept** (it may hold logins;
+  the same name reuses it), which means profiles are what accumulate:
+  `rm NAME --purge` still works on a name with no registry entry and deletes
+  the leftover profile.
 - Screenshots taken in a session are named `shot-NAME-…` / `web-NAME-…`.
 
 ## The viewer (`src/opr/viewer.py`)
